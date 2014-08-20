@@ -158,23 +158,22 @@ class FollowerBlocksTest extends \PHPUnit_Framework_TestCase
     }
 
     protected function getFollowerSetup() {
-        list($db_connection_string, $db_user, $db_password, $db_name) = $this->buildConnectionInfo(false);
-        $pdo = new \PDO($db_connection_string, $db_user, $db_password);
-        $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
-        return new FollowerSetup($pdo, $db_name);
+        $db_name = getenv('DB_NAME');
+        if (!$db_name) { throw new Exception("No DB_NAME env var found", 1); }
+        return new FollowerSetup($this->getPDOWithoutDB(), $db_name);
     }
 
     protected function initAllFollowerDBs() {
         // native
         $db_name = getenv('NATIVE_DB_NAME');
         if (!$db_name) { throw new Exception("No NATIVE_DB_NAME env var found", 1); }
-        $native_follower_setup = new \Utipd\NativeFollower\FollowerSetup($this->getPDO($db_name), $db_name);
+        $native_follower_setup = new \Utipd\NativeFollower\FollowerSetup($this->getPDOWithoutDB(), $db_name);
         $native_follower_setup->initializeAndEraseDatabase();
         
         // xcpd
         $db_name = getenv('XCPD_DB_NAME');
         if (!$db_name) { throw new Exception("No XCPD_DB_NAME env var found", 1); }
-        $counterparty_follower_setup = new \Utipd\CounterpartyFollower\FollowerSetup($this->getPDO($db_name), $db_name);
+        $counterparty_follower_setup = new \Utipd\CounterpartyFollower\FollowerSetup($this->getPDOWithoutDB(), $db_name);
         $counterparty_follower_setup->initializeAndEraseDatabase();
 
         // combined
@@ -183,6 +182,13 @@ class FollowerBlocksTest extends \PHPUnit_Framework_TestCase
 
     protected function getPDO($db_name=null) {
         list($db_connection_string, $db_user, $db_password, $db_name) = $this->buildConnectionInfo(true, $db_name);
+        $pdo = new \PDO($db_connection_string, $db_user, $db_password);
+        $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+        return $pdo;
+    }
+
+    protected function getPDOWithoutDB() {
+        list($db_connection_string, $db_user, $db_password) = $this->buildConnectionInfo(false);
         $pdo = new \PDO($db_connection_string, $db_user, $db_password);
         $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
         return $pdo;
