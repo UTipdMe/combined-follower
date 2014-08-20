@@ -1,0 +1,19 @@
+<phpunit bootstrap="./test/bootstrap.php" colors="true" backupGlobals="false">
+    <testsuites>
+        <testsuite name="utpid">
+            <directory>test/tests</directory>
+        </testsuite>
+    </testsuites>
+
+    <php>
+        <env name="DB_NAME" value="combined_follower_test" />
+        <env name="DB_HOST" value="127.0.0.1" />
+        <env name="DB_PORT" value="3306" />
+        <env name="DB_USER" value="root" />
+        <env name="DB_PASSWORD" value="" />
+
+        <env name="NATIVE_DB_NAME" value="native_follower_test" />
+        <env name="XCPD_DB_NAME" value="xcp_follower_test" />
+    </php>
+
+</phpunit>
