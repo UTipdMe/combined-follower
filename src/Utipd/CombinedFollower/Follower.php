@@ -149,6 +149,13 @@ class Follower
 
 
     ////////////////////////////////////////////////////////////////////////
+    // Transactions
+    
+    public function allTransactionsToDestination($destination_address) {
+        return $this->blockchain_tx_directory->find(['destination' => $destination_address], ['isMempool' => 1, 'id' => 1]);
+    }
+
+    ////////////////////////////////////////////////////////////////////////
 
 
     protected function init() {
