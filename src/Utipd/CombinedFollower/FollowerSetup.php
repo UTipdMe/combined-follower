@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS `blockchaintransaction` (
     `document`      LONGTEXT NOT NULL DEFAULT '',
     PRIMARY KEY (`id`),
     KEY `blockId` (`blockId`),
+    KEY `destination` (`destination`),
     KEY `isMempool_isNative` (`isMempool`,`isNative`),
     UNIQUE KEY `tx_hash_isNative` (`tx_hash`,`isNative`)
 ) ENGINE=InnoDB AUTO_INCREMENT=101 DEFAULT CHARSET=utf8;
