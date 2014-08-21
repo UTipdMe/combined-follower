@@ -170,8 +170,8 @@ class Follower
             $this->clearAllMempoolTransactions($native=false);
 
             // callback
-            if (isset($this->new_native_block_callback_fn)) {
-                $f = $this->new_native_block_callback_fn;
+            if (isset($this->new_xcpd_block_callback_fn)) {
+                $f = $this->new_xcpd_block_callback_fn;
                 $f($block_id);
             }
 
@@ -202,10 +202,13 @@ class Follower
             $this->clearAllMempoolTransactions($native=true);
 
             // callback
-            if (isset($this->new_xcpd_block_callback_fn)) {
-                $f = $this->new_xcpd_block_callback_fn;
+            if (isset($this->new_native_block_callback_fn)) {
+                $f = $this->new_native_block_callback_fn;
                 $f($block_id);
             }
+
+            // now check every confirmed send withing max_confirmations blocks and call the callback
+            $this->invokeConfirmedTransactionCallbacks($block_id, $is_native=true);
         });
 
         $this->native_follower->handleNewTransaction(function($transaction, $block_id, $is_mempool) {
