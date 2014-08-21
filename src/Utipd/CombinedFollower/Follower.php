@@ -33,11 +33,13 @@ class Follower
 
         // init directories
         $this->blockchain_tx_directory = new BlockchainTransactionDirectory($db_connection);
-        $this->watch_address_directory = new WatchAddressDirectory($db_connection);
 
         // init default genesis block for followers
         $this->xcpd_follower->setGenesisBlock($this->genesis_block);
         $this->native_follower->setGenesisBlock($this->genesis_block);
+
+        // initialize the callbacks
+        $this->init();
     }
 
     public function setGenesisBlock($genesis_block) {
