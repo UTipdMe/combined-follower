@@ -70,14 +70,12 @@ class FollowerBlocksTest extends \PHPUnit_Framework_TestCase
         $this->setCurrentBlock(300001);
         $follower->runOneIteration();
 
-        // check blocks found
-        PHPUnit::assertCount(2, $xcp_txs_map);
-        PHPUnit::assertCount(2, $native_txs_map);
+        // check transactions found (each one is only triggered once)
+        PHPUnit::assertCount(1, $xcp_txs_map);
+        PHPUnit::assertCount(1, $native_txs_map);
 
         PHPUnit::assertEquals('13UxmTs2Ad2CpMGvLJu3tSV2YVuiNcVkvn', $xcp_txs_map['300000'][0]['source']);
-        PHPUnit::assertEquals('13UxmTs2Ad2CpMGvLJu3tSV2YVuiNcVkvn', $xcp_txs_map['300001'][0]['source']);
         PHPUnit::assertEquals(0.5*100000000, $native_txs_map['300000'][0]['quantity']);
-        PHPUnit::assertEquals(0.6*100000000, $native_txs_map['300000'][1]['quantity']);
     }
 
 
@@ -117,7 +115,6 @@ class FollowerBlocksTest extends \PHPUnit_Framework_TestCase
         $this->setCurrentBlock(300005);
         $follower->runOneIteration();
 
-        // echo "\$xcp_txs:\n".json_encode($xcp_txs, 192)."\n";
         // check blocks found
         PHPUnit::assertCount(6, $xcp_txs);
 
@@ -219,7 +216,210 @@ class FollowerBlocksTest extends \PHPUnit_Framework_TestCase
     }
 
 
+    public function testCombinedBTCAndCounterpartyMempoolTransaction() {
+        // init all dbs
+        $this->initAllFollowerDBs();
 
+        // init the sample data (for combined test)
+        $this->initAllSampleData();
+        $this->mempool_xcp_transactions = $this->buildSampleMempoolXCPTransactionsForCombined();
+        $this->mempool_native_transactions = $this->buildSampleMempoolBTCTransactionsForCombined();
+        $this->mempool_native_tx_ids = array_keys($this->mempool_native_transactions);
+
+        // watch confirmed tx
+        $follower = $this->getFollower();
+        $follower->addAddressToWatch('dest01');
+
+
+        // track mempool transactions
+        $mempool_txs = [];
+        $follower->handleMempoolTransaction(function ($transaction, $current_block_id) use (&$mempool_txs) {
+            $mempool_txs[] = $transaction;
+        });
+
+        // add a BTC dust mempool transaction
+        $follower->setGenesisBlock(300000);
+        $this->setCurrentBlock(300000);
+        $follower->runOneIteration();
+
+        PHPUnit::assertCount(1, $mempool_txs);
+    }
+
+    public function testCombinedBTCAndCounterpartyConfirmedTransaction() {
+        // init all dbs
+        $this->initAllFollowerDBs();
+
+        // init the sample data (for combined test)
+        $this->initAllSampleData();
+        $this->xcp_transactions = $this->buildSampleXCPTransactionsForCombined();
+        $this->native_transactions = $this->buildSampleBTCTransactionsForCombined();
+
+        // watch confirmed tx
+        $follower = $this->getFollower();
+        $follower->addAddressToWatch('dest01');
+
+        // track confirmed transactions
+        $confirmed_transactions = [];
+        $follower->handleConfirmedTransaction(function ($transaction, $confirmations, $current_block_id) use (&$confirmed_transactions) {
+            $confirmed_transactions[] = $transaction;
+        });
+
+        // add a BTC dust confirmed transaction
+        $follower->setGenesisBlock(300000);
+        $this->setCurrentBlock(300000);
+        $follower->runOneIteration();
+
+        PHPUnit::assertCount(1, $confirmed_transactions);
+
+        // do a second confirmation for the confirmation
+        $this->setCurrentBlock(300001);
+        $follower->runOneIteration();
+
+        PHPUnit::assertCount(2, $confirmed_transactions);
+    }
+
+
+
+    public function testConfirmedTransactionsWipeOutPendingMempoolCarrierTransactions() {
+        // init all dbs
+        $this->initAllFollowerDBs();
+
+        // init the sample data (for combined test)
+        $this->initAllSampleData();
+        $this->mempool_xcp_transactions = $this->buildSampleMempoolXCPTransactionsForCombined();
+        $this->mempool_native_transactions = $this->buildSampleMempoolBTCTransactionsForCombined();
+        $this->mempool_native_tx_ids = array_keys($this->mempool_native_transactions);
+        // $this->xcp_transactions = $this->buildSampleXCPTransactionsForCombined();
+        // $this->native_transactions = $this->buildSampleBTCTransactionsForCombined();
+
+        // watch confirmed tx
+        $follower = $this->getFollower();
+        $follower->addAddressToWatch('dest01');
+
+        // track mempool transactions
+        $mempool_txs = [];
+        $follower->handleMempoolTransaction(function ($transaction, $current_block_id) use (&$mempool_txs) {
+            $mempool_txs[] = $transaction;
+        });
+        // track confirmed transactions
+        $confirmed_transactions = [];
+        $follower->handleConfirmedTransaction(function ($transaction, $confirmations, $current_block_id) use (&$confirmed_transactions) {
+            $confirmed_transactions[] = $transaction;
+        });
+
+        // add a BTC dust confirmed transaction
+        $follower->setGenesisBlock(300000);
+        $this->setCurrentBlock(300000);
+        $follower->runOneIteration();
+
+        PHPUnit::assertCount(1, $mempool_txs);
+        PHPUnit::assertCount(1, $confirmed_transactions);
+
+        // do a second confirmation for the confirmation
+        $this->mempool_xcp_transactions = [];
+        $this->mempool_native_transactions = [];
+        $this->mempool_native_tx_ids = [];
+        $this->setCurrentBlock(300001);
+        $follower->runOneIteration();
+
+        // see if combined_follower_test.pendingcarriertx is erased
+        $sth = $this->getPDO(getenv('DB_NAME'))->query("SELECT COUNT(*) AS count FROM pendingcarriertx WHERE isMempool = 1");
+        while ($row = $sth->fetch(PDO::FETCH_NUM)) { $carrier_tx_count_in_db = $row[0]; }
+        PHPUnit::assertEquals(0, $carrier_tx_count_in_db);
+
+    }
+
+
+    public function testFakeBTCSmallTransactionsThatAreNotCarriersConfirmLater() {
+        // init all dbs
+        $this->initAllFollowerDBs();
+
+        // init the sample data (for combined test)
+        $this->initAllSampleData();
+        $this->mempool_xcp_transactions = $this->buildSampleMempoolXCPTransactionsForCombined();
+        $this->mempool_native_transactions = $this->buildSampleMempoolBTCTransactionsForCombined();
+        $this->mempool_native_transactions['combinedtxhash001']->txid = 'someothertxhash';
+        $this->mempool_native_tx_ids = array_keys($this->mempool_native_transactions);
+
+        // watch confirmed tx
+        $follower = $this->getFollower();
+        $follower->addAddressToWatch('dest01');
+
+        // track mempool transactions
+        $mempool_txs = [];
+        $follower->handleMempoolTransaction(function ($transaction, $current_block_id) use (&$mempool_txs) {
+            $mempool_txs[] = $transaction;
+        });
+
+        // add a BTC dust confirmed transaction
+        $follower->setGenesisBlock(300000);
+        $this->setCurrentBlock(300000);
+        $follower->runOneIteration();
+
+        // starts at 1 tx, because the second one looks like a carrier
+        PHPUnit::assertCount(1, $mempool_txs);
+
+        // let some time pass, and then process another iteration
+        $follower->_now_timestamp = time() + 90;
+        $follower->runOneIteration();
+
+        // still 1 tx because not enough time has passed
+        PHPUnit::assertCount(1, $mempool_txs);
+
+
+        $follower->_now_timestamp = time() + 121;
+        $follower->runOneIteration();
+
+        // now, should see both mempool txs
+        PHPUnit::assertCount(2, $mempool_txs);
+    }
+
+    // orphans wipe out pendingcarriertx
+    public function testorphandWipeOutPendingCarrierTransactions() {
+
+        // init all dbs
+        $this->initAllFollowerDBs();
+
+        // init the sample data (for combined test)
+        $this->initAllSampleData();
+        $this->native_transactions = $this->buildSampleBTCTransactionsForCombined();
+        $this->native_transactions['A00001']->hash = 'nonxcphash01';
+
+        // init follower
+        $follower = $this->getFollower();
+        $follower->addAddressToWatch('dest01');
+
+        // run 1 blocks
+        $follower->setGenesisBlock(300001);
+        $this->setCurrentBlock(300001);
+        $follower->runOneIteration();
+
+
+        // see if combined_follower_test.pendingcarriertx has transactions
+        $sth = $this->getPDO(getenv('DB_NAME'))->query("SELECT COUNT(*) AS count FROM pendingcarriertx");
+        while ($row = $sth->fetch(PDO::FETCH_NUM)) { $carrier_tx_count_in_db = $row[0]; }
+        PHPUnit::assertEquals(1, $carrier_tx_count_in_db);
+
+        // no more small transactions
+        $this->native_transactions['A00001']->out[0]->value = 10000000;
+
+        // now orphan next block 300001
+        $this->native_blocks = $this->getSampleNativeBlocksForReorganizedChain();
+        $this->setCurrentBlock(300003);
+        $follower->runOneIteration();
+
+
+        // see if combined_follower_test.pendingcarriertx is erased
+        $sth = $this->getPDO(getenv('DB_NAME'))->query("SELECT COUNT(*) AS count FROM pendingcarriertx");
+        while ($row = $sth->fetch(PDO::FETCH_NUM)) { $carrier_tx_count_in_db = $row[0]; }
+        PHPUnit::assertEquals(0, $carrier_tx_count_in_db);
+
+    }
+
+    ////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////
     
     
@@ -317,8 +517,8 @@ class FollowerBlocksTest extends \PHPUnit_Framework_TestCase
                     return $this->xcp_running_info;
                 })
                 ->addCallback('get_sends', function($vars) {
-                    if (isset($this->xcp_sends[$vars['start_block']])) {
-                        return [$this->xcp_sends[$vars['start_block']]];
+                    if (isset($this->xcp_transactions[$vars['start_block']])) {
+                        return [$this->xcp_transactions[$vars['start_block']]];
                     }
 
                     // no sends
@@ -383,15 +583,23 @@ class FollowerBlocksTest extends \PHPUnit_Framework_TestCase
         return $this->mock_guzzle_client;
     }
 
+    ////////////////////////////////////////////////////////////////////////
+    /// sample data
+
     protected function initAllSampleData() {
-        $this->native_blocks = $this->getSampleNativeBlocks();
-        $this->native_txs = $this->getSampleTransactionsForBlockchainInfo();
-        $this->xcp_running_info = ['bitcoin_block_count' => 300002, 'last_block' => ['block_index' => 300002]];
         $this->native_block_height = 300002;
-        $this->xcp_sends = $this->getSampleXCPSends();
-        $this->mempool_xcp_transactions = $this->buildSampleMempoolXCPTransactions();
-        $this->mempool_native_tx_ids = $this->buildSampleMempoolNativeTransactionIDs();
+
         $this->mempool_native_transactions = $this->buildSampleMempoolTransactions();
+        $this->mempool_native_tx_ids = $this->buildSampleMempoolNativeTransactionIDs();
+
+        $this->native_blocks = $this->getSampleNativeBlocks();
+        $this->native_transactions = $this->getSampleTransactionsForBlockchainInfo();
+        
+
+        $this->xcp_running_info = ['bitcoin_block_count' => 300002, 'last_block' => ['block_index' => 300002]];
+
+        $this->mempool_xcp_transactions = $this->buildSampleMempoolXCPTransactions();
+        $this->xcp_transactions = $this->getSampleXCPSends();
     }
 
     protected function setCurrentBlock($xcp_block_height, $native_block_height=null) {
@@ -553,7 +761,7 @@ EOT
     }
 
     protected function applyTransactionsToSampleBlock($block) {
-        $sample_transactions = $this->native_txs;
+        $sample_transactions = $this->native_transactions;
         $out = $block;
         $out['tx'] = [];
         foreach($block['tx'] as $tx_id) {
@@ -778,5 +986,262 @@ EOT
             ];
         return $native_mempool_txs;
     }
+
+
+    ////////////////////////////////////////////////////////////////////////
+
+
+    protected function buildSampleMempoolXCPTransactionsForCombined() {
+        return json_decode($_j = <<<EOT
+                        [
+                            {
+                                "bindings": "{\"asset\": \"MYASSETONE\", \"destination\": \"dest01\", \"quantity\": 10, \"source\": \"13UxmTs2Ad2CpMGvLJu3tSV2YVuiNcVkvn\", \"tx_hash\": \"combinedtxhash001\"}",
+                                "category": "sends",
+                                "command": "insert",
+                                "timestamp": 1407585745,
+                                "tx_hash": "combinedtxhash001"
+                            }
+                        ]
+EOT
+                        , true);
+    }
+
+    protected function buildSampleMempoolBTCTransactionsForCombined() {
+            $native_mempool_txs =  [
+                // ################################################################################################
+                "combinedtxhash001" => json_decode($_j = <<<EOT
+{
+    "txid": "combinedtxhash001",
+    "version": 1,
+    "locktime": 0,
+    "vin": [
+        {
+            "txid": "ebbb76c12c4de2207fa482958e1eafa13fcee9ead64a616bdb01e00b37cb52a6",
+            "vout": 1,
+            "scriptSig": {
+                "asm": "3045022074f04cfad743082a16fb0f005ad3ff7311a4fe6f952b267110af6b7e56f0a89c022100a8d3b3075328e2e220cd3abda147b94a97112c4b41dc11227ba669597cb4cc3c01 046af1d67a6b4db50d61bb0e3a4bf855f01d35be157476d04b5942e1b732956457db009ffa621bb8122b53818033f6996b5c63081e24f9770d6d2fe4408e9afc80",
+                "hex": "483045022074f04cfad743082a16fb0f005ad3ff7311a4fe6f952b267110af6b7e56f0a89c022100a8d3b3075328e2e220cd3abda147b94a97112c4b41dc11227ba669597cb4cc3c0141046af1d67a6b4db50d61bb0e3a4bf855f01d35be157476d04b5942e1b732956457db009ffa621bb8122b53818033f6996b5c63081e24f9770d6d2fe4408e9afc80"
+            },
+            "sequence": 4294967295
+        }
+    ],
+    "vout": [
+        {
+            "value": 0.000078,
+            "n": 0,
+            "scriptPubKey": {
+                "asm": "OP_DUP OP_HASH160 c153c44c7e86b4040680bfbda69dc7f6400123ea OP_EQUALVERIFY OP_CHECKSIG",
+                "hex": "76a914c153c44c7e86b4040680bfbda69dc7f6400123ea88ac",
+                "reqSigs": 1,
+                "type": "pubkeyhash",
+                "addresses": [
+                    "dest01"
+                ]
+            }
+        },
+        {
+            "value": 0.02233228,
+            "n": 1,
+            "scriptPubKey": {
+                "asm": "OP_DUP OP_HASH160 78af7d849c3c4767584502bd22ddf2b642c2eb20 OP_EQUALVERIFY OP_CHECKSIG",
+                "hex": "76a91478af7d849c3c4767584502bd22ddf2b642c2eb2088ac",
+                "reqSigs": 1,
+                "type": "pubkeyhash",
+                "addresses": [
+                    "1C18KJPUfAmsaqTUiJ4VujzMz37MM3W2AJ"
+                ]
+            }
+        }
+    ]
+}
+
+EOT
+            ),
+                "rawtxid002" => json_decode($_j = <<<EOT
+{
+    "txid": "rawtxid002",
+    "version": 1,
+    "locktime": 0,
+    "vin": [
+        {
+            "txid": "ebbb76c12c4de2207fa482958e1eafa13fcee9ead64a616bdb01e00b37cb52a6",
+            "vout": 1,
+            "scriptSig": {
+                "asm": "3045022074f04cfad743082a16fb0f005ad3ff7311a4fe6f952b267110af6b7e56f0a89c022100a8d3b3075328e2e220cd3abda147b94a97112c4b41dc11227ba669597cb4cc3c01 046af1d67a6b4db50d61bb0e3a4bf855f01d35be157476d04b5942e1b732956457db009ffa621bb8122b53818033f6996b5c63081e24f9770d6d2fe4408e9afc80",
+                "hex": "483045022074f04cfad743082a16fb0f005ad3ff7311a4fe6f952b267110af6b7e56f0a89c022100a8d3b3075328e2e220cd3abda147b94a97112c4b41dc11227ba669597cb4cc3c0141046af1d67a6b4db50d61bb0e3a4bf855f01d35be157476d04b5942e1b732956457db009ffa621bb8122b53818033f6996b5c63081e24f9770d6d2fe4408e9afc80"
+            },
+            "sequence": 4294967295
+        }
+    ],
+    "vout": [
+        {
+            "value": 0.000078,
+            "n": 0,
+            "scriptPubKey": {
+                "asm": "OP_DUP OP_HASH160 c153c44c7e86b4040680bfbda69dc7f6400123ea OP_EQUALVERIFY OP_CHECKSIG",
+                "hex": "76a914c153c44c7e86b4040680bfbda69dc7f6400123ea88ac",
+                "reqSigs": 1,
+                "type": "pubkeyhash",
+                "addresses": [
+                    "dest02"
+                ]
+            }
+        },
+        {
+            "value": 0.08,
+            "n": 1,
+            "scriptPubKey": {
+                "asm": "OP_DUP OP_HASH160 78af7d849c3c4767584502bd22ddf2b642c2eb20 OP_EQUALVERIFY OP_CHECKSIG",
+                "hex": "76a91478af7d849c3c4767584502bd22ddf2b642c2eb2088ac",
+                "reqSigs": 1,
+                "type": "pubkeyhash",
+                "addresses": [
+                    "1C18KJPUfAmsaqTUiJ4VujzMz37MM3W2AJ"
+                ]
+            }
+        }
+    ]
+}
+
+EOT
+                ),
+            ];
+        return $native_mempool_txs;
+    }    
+    
+    ////////////////////////////////////////////////////////////////////////
+    // Combined Confirmed Transactions
+
+    protected function buildSampleXCPTransactionsForCombined() {
+        return [
+            "300000" => [
+                // fake info
+                "block_index" => 300000,
+                "tx_index"    => 100000,
+                "source"      => "1NFeBp9s5aQ1iZ26uWyiK2AYUXHxs7bFmB",
+                "destination" => "dest01",
+                "asset"       => "XCP",
+                "status"      => "valid",
+                "quantity"    => 490000000,
+                "tx_hash"     => "hash1",
+            ],
+            "300001" => [
+                // fake info
+                "block_index" => 300001,
+                "tx_index"    => 100001,
+                "source"      => "source2",
+                "destination" => "dest02",
+                "asset"       => "ASSET2",
+                "status"      => "valid",
+                "quantity"    => 490000000,
+                "tx_hash"     => "hash2",
+            ]
+        ];
+    }
+
+    protected function buildSampleBTCTransactionsForCombined() {
+        $samples =  [
+            // ################################################################################################
+            "A00001" => json_decode($_j = <<<EOT
+{
+    "hash": "hash1",
+    "inputs": [
+        {
+            "prev_out": {
+                "addr": "1J4gVXjd1CT2NnGFkmzaJJvNu4GVUfYLVK",
+                "n": 1,
+                "script": "76a914bb2c5a35cc23ad967773b6734ce956b8ded8cf2388ac",
+                "txid": 22961584,
+                "type": 0,
+                "value": 56870000
+            },
+            "script": "76a914bb2c5a35cc23ad967773b6734ce956b8ded8cf2388ac"
+        }
+    ],
+    "out": [
+        {
+            "addr": "dest01",
+            "n": 0,
+            "script": "210231a3996818ce0d955279421e4f0c4bd07502b9c03c135409e3189c0e067cbb9bac",
+            "spent": false,
+            "txid": 24736715,
+            "type": 0,
+            "value": 7800
+        }
+    ],
+    "relayed_by": "24.210.191.129",
+    "size": 203,
+    "time": 1376370366,
+    "txid": 24736715,
+    "ver": 1,
+    "vin_sz": 1,
+    "vout_sz": 1
+}
+
+EOT
+            ),
+            // ################################################################################################
+            "A00002" => json_decode($_j = <<<EOT
+{
+    "hash": "hash2",
+    "inputs": [
+        {
+            "prev_out": {
+                "addr": "14nJzbZHueWg5VHa4bDFQ2yxx4pbCDaEvL",
+                "n": 116,
+                "script": "76a914297a1d8ea54f8ef26f524597a187a83c708cf07f88ac",
+                "txid": 26175189,
+                "type": 0,
+                "value": 880
+            },
+            "script": "76a914297a1d8ea54f8ef26f524597a187a83c708cf07f88ac"
+        },
+        {
+            "prev_out": {
+                "addr": "14nJzbZHueWg5VHa4bDFQ2yxx4pbCDaEvL",
+                "n": 0,
+                "script": "76a914297a1d8ea54f8ef26f524597a187a83c708cf07f88ac",
+                "txid": 27968848,
+                "type": 0,
+                "value": 59000000
+            },
+            "script": "76a914297a1d8ea54f8ef26f524597a187a83c708cf07f88ac"
+        }
+    ],
+    "out": [
+        {
+            "addr": "dest02",
+            "n": 0,
+            "script": "2102f4e9b26c2e0e86761e411e03ffd7b15b8ca4dbea464fb8a4a5dab4220e602c64ac",
+            "spent": true,
+            "txid": 30536227,
+            "type": 0,
+            "value": 7800
+        }
+    ],
+    "relayed_by": "85.17.239.32",
+    "size": 349,
+    "time": 1376370307,
+    "txid": 30536227,
+    "ver": 1,
+    "vin_sz": 2,
+    "vout_sz": 1
+}
+
+
+EOT
+            ),
+            // ################################################################################################
+        ];
+
+        // copy to 
+        foreach (['B00001','B00002','C00001','C00002','D00001','D00002','E00001','E00002','F00001','F00002','G00001','G00002',] as $new_id) {
+            $samples[$new_id] = clone $samples["A0000".substr($new_id, -1)];
+            $samples[$new_id]->hash = $new_id;
+        }
+
+        return $samples;
+    }    
+    
 
 }

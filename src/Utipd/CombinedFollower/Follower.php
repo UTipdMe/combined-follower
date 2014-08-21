@@ -6,6 +6,8 @@ use PDO;
 use Utipd\CombinedFollower\Models\Directory\BlockchainTransactionDirectory;
 use Utipd\CombinedFollower\Models\Directory\WatchAddressDirectory;
 
+// TODO: suppress dust BTC transactions that are actually XCP transactions
+
 /**
 *       
 */
@@ -23,6 +25,10 @@ class Follower
     protected $orphaned_transaction_callback_fn;
 
     protected $max_confirmations_for_confirmed_tx = 6;
+
+    protected $BTC_DUST_TIMEOUT_TTL = 120; // after 120 seconds, we assume a BTC dust transaction was not matched by counterparty
+
+    var $_now_timestamp = null; // for testing
 
     function __construct($native_follower, $xcpd_follower, PDO $db_connection) {
         $this->native_follower = $native_follower;
@@ -106,6 +112,9 @@ class Follower
     public function runOneIteration() {
         $this->native_follower->processOneNewBlock();
         $this->xcpd_follower->processOneNewBlock();
+
+        // find any timed unmatched BTC dust transactions
+        $this->handleTimedOutBTCDustTransactions();
     }
 
 
@@ -208,6 +217,9 @@ class Follower
                 $f($block_id);
             }
 
+            // clear all mempool based pending carrier transactions
+            $this->clearMempoolXCPCarrierTransactions();
+
             // now check every confirmed send withing max_confirmations blocks and call the callback
             $this->invokeConfirmedTransactionCallbacks($block_id, $is_native=true);
         });
@@ -278,6 +290,9 @@ class Follower
                 }
             }
 
+            // clear orphaned pending transactions
+            $this->clearMempoolXCPCarrierTransactionsByBlockID($orphaned_block_id);
+
         });
     }
 
@@ -290,25 +305,56 @@ class Follower
     // callbacks
     
     protected function invokeNewTransactionCallbacks($transaction, $is_native, $is_mempool, $current_block_id) {
+        $is_carrier_transaction = false;
+        $skip_callback = false;
+
+        // this is a confirmed BTC carrier transaction for a Counterparty transaction
+        if ($is_native AND $this->isXCPCarrierTransaction($transaction['tx_hash'])) {
+            $is_carrier_transaction = true;
+            $skip_callback = true;
+        }
+
+        // if this looks like a carrier transaction, don't do the callback (yet)
+        if (!$is_carrier_transaction) {
+            if ($is_native AND $this->looksLikeXCPCarrierTransaction($transaction)) {
+                $skip_callback = true;
+                $this->savePendingXCPCarrierTransaction($transaction['tx_hash'], $current_block_id, $is_mempool);
+            }
+        }
+
+        // call new transaction callbacks
+        $number_of_confirmations = ($is_mempool ? 0 : 1);
+        if (!$skip_callback) {
+            $was_triggered = $this->callNewTransactionCallbacks($transaction, $is_native, $is_mempool, $current_block_id, $number_of_confirmations);
+            if ($was_triggered) {
+                $this->markCallbackTriggered($transaction['tx_hash'], $number_of_confirmations, $current_block_id);
+            }
+        }
+    }
+
+    protected function callNewTransactionCallbacks($transaction, $is_native, $is_mempool, $current_block_id, $number_of_confirmations) {
+        $was_triggered = true;
         if ($is_mempool) {
             // mempool
             if (isset($this->mempool_tx_callback_fn)) {
-                $f = $this->mempool_tx_callback_fn;
-                $f($transaction, $current_block_id);
+                if ($this->shouldTriggerCallback($transaction['tx_hash'], $number_of_confirmations)) {
+                    $f = $this->mempool_tx_callback_fn;
+                    $f($transaction, $current_block_id);
+                    $was_triggered = true;
+                }
             }
         } else {
             // confirmed
             if (isset($this->confirmed_tx_callback_fn)) {
-
-                // always send first confirmation
-                $f = $this->confirmed_tx_callback_fn;
-                $number_of_confirmations = 1;
-                $f($transaction, $number_of_confirmations, $current_block_id);
-
-                // mark as triggered
-                $this->markConfirmationTriggered($transaction['tx_hash'], $number_of_confirmations, $current_block_id);
+                if ($this->shouldTriggerCallback($transaction['tx_hash'], $number_of_confirmations)) {
+                    $f = $this->confirmed_tx_callback_fn;
+                    $f($transaction, $number_of_confirmations, $current_block_id);
+                    $was_triggered = true;
+                } 
             }
         }
+        return $was_triggered;
+
     }
 
     // check every confirmed send withing max_confirmations blocks and call the callback
@@ -327,33 +373,50 @@ class Follower
         $transactions = $this->blockchain_tx_directory->findRaw($sql, [$max_block_id, $block_id, intval($is_native)]);
         $f = $this->confirmed_tx_callback_fn;
         foreach($transactions as $transaction) {
+            $is_carrier_transaction = false;
+            $skip_callback = false;
+
+            // this is a confirmed BTC carrier transaction for a Counterparty transaction
+            if ($is_native AND $this->isXCPCarrierTransaction($transaction['tx_hash'])) {
+                $is_carrier_transaction = true;
+                $skip_callback = true;
+            }
+
+            // if this looks like a carrier transaction, don't do the callback (yet)
+            if (!$is_carrier_transaction) {
+                if ($is_native AND $this->looksLikeXCPCarrierTransaction($transaction)) {
+                    $skip_callback = true;
+                    $this->savePendingXCPCarrierTransaction($transaction['tx_hash'], $block_id, false);
+                }
+            }
+
             $confirmations_in_db = $block_id - $transaction['blockId'] + 1;
             $max_number_of_confirmations = min($confirmations_in_db, $this->max_confirmations_for_confirmed_tx);
 
             // trigger every confirmation up to $this->max_confirmations_for_confirmed_tx
             for ($i=0; $i < $max_number_of_confirmations; $i++) { 
                 $number_of_confirmations = $i + 1;
-                if ($this->shouldTriggerConfirmation($transaction['tx_hash'], $number_of_confirmations)) {
+                if (!$skip_callback AND $this->shouldTriggerCallback($transaction['tx_hash'], $number_of_confirmations)) {
                     // trigger confirmation callback
                     $f($transaction, $number_of_confirmations, $block_id);
 
                     // mark as triggered
-                    $this->markConfirmationTriggered($transaction['tx_hash'], $number_of_confirmations, $block_id);
+                    $this->markCallbackTriggered($transaction['tx_hash'], $number_of_confirmations, $block_id);
                 }
-            }
 
+            }
         }
     }
 
-    protected function shouldTriggerConfirmation($tx_hash, $number_of_confirmations) {
-        $sth = $this->db_connection->prepare("SELECT COUNT(*) FROM confirmationtriggered WHERE tx_hash = ? AND confirmations = ?");
+    protected function shouldTriggerCallback($tx_hash, $number_of_confirmations) {
+        $sth = $this->db_connection->prepare("SELECT COUNT(*) FROM callbacktriggered WHERE tx_hash = ? AND confirmations = ?");
         $result = $sth->execute([$tx_hash, $number_of_confirmations]);
         $row = $sth->fetch(PDO::FETCH_NUM);
         return ($row[0] == 0);
     }
 
-    protected function markConfirmationTriggered($tx_hash, $number_of_confirmations, $block_id) {
-        $sth = $this->db_connection->prepare("REPLACE INTO confirmationtriggered (tx_hash, confirmations, blockId) VALUES (?,?,?)");
+    protected function markCallbackTriggered($tx_hash, $number_of_confirmations, $block_id) {
+        $sth = $this->db_connection->prepare("REPLACE INTO callbacktriggered (tx_hash, confirmations, blockId) VALUES (?,?,?)");
         $result = $sth->execute([$tx_hash, $number_of_confirmations, $block_id]);
     }
 
@@ -375,6 +438,84 @@ class Follower
             $map[$row[0]] = true;
         }
         return $map;
+    }
+
+
+    ////////////////////////////////////////////////////////////////////////
+    // Carrier Transactions
+       
+
+    protected function looksLikeXCPCarrierTransaction($transaction) {
+        // 0.000078 = 7800 satoshis
+        if ($transaction['quantity'] <= 7800) {
+            return true;
+        }
+        return false;
+    }
+
+    protected function savePendingXCPCarrierTransaction($tx_hash, $block_id, $is_mempool) {
+        $sth = $this->db_connection->prepare("REPLACE INTO pendingcarriertx (`tx_hash`, `blockId`, `isMempool`, `timestamp`) VALUES (?,?,?,?)");
+        $timestamp = time();
+        $result = $sth->execute([$tx_hash, $block_id, $is_mempool, $timestamp]);
+    }
+
+    protected function isXCPCarrierTransaction($tx_hash) {
+        // find a matching XCP transaction
+        if ($this->blockchain_tx_directory->findOne(['tx_hash' => $tx_hash, 'isNative' => 0])) {
+            return true;
+        }
+
+        return false;
+    }
+
+    protected function clearMempoolXCPCarrierTransactions() {
+        $result = $this->db_connection->exec("DELETE FROM pendingcarriertx WHERE isMempool = 1");
+    }
+
+    protected function clearMempoolXCPCarrierTransactionsByBlockID($block_id) {
+        $sth = $this->db_connection->prepare("DELETE FROM pendingcarriertx WHERE blockId >= ?");
+        $result = $sth->execute([$block_id]);
+    }
+
+    protected function handleTimedOutBTCDustTransactions() {
+        $old_enough_ts = $this->now() - $this->BTC_DUST_TIMEOUT_TTL;
+        $sth = $this->db_connection->prepare("SELECT * FROM pendingcarriertx WHERE timestamp <= ?");
+        $result = $sth->execute([$old_enough_ts]);
+
+        $tx_hashes_to_delete = [];
+        $tx_hashes_to_process = [];
+        while ($row = $sth->fetch(PDO::FETCH_ASSOC)) {
+            $tx_hashes_to_delete[] = $row['tx_hash'];
+            if (!$this->isXCPCarrierTransaction($row['tx_hash'])) {
+                $tx_hashes_to_process[] = $row['tx_hash'];
+            }
+        }
+
+        // delete all the tx hashes
+        if ($tx_hashes_to_delete) {
+            $q_marks = rtrim(str_repeat('?,', count($tx_hashes_to_delete)), ',');
+            $result = $this->db_connection->prepare("DELETE FROM pendingcarriertx WHERE tx_hash IN ({$q_marks})")->execute($tx_hashes_to_delete);
+        }
+
+        // process all the tx_hashes
+        $current_block_id = $this->native_follower->getLastProcessedBlock();
+        foreach($tx_hashes_to_process as $tx_hash) {
+            $transaction = $this->blockchain_tx_directory->findOne(['tx_hash' => $tx_hash, 'isNative' => 1]);
+
+            // process it
+            $number_of_confirmations = $transaction['isMempool'] ? 0 : ($current_block_id - $transaction['blockId'] + 1);
+            $was_triggered = $this->callNewTransactionCallbacks($transaction, true, $transaction['isMempool'], $current_block_id, $number_of_confirmations);
+
+            // mark as triggered
+            if ($was_triggered) {
+                $this->markCallbackTriggered($transaction['tx_hash'], $number_of_confirmations, $current_block_id);
+            }
+        }
+    }
+
+    protected function now() {
+        if (isset($this->_now_timestamp)) { return $this->_now_timestamp; }
+        return time();
     }
 
 }

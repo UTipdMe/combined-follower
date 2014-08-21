@@ -41,7 +41,8 @@ class FollowerSetup
 
         $this->exec("DROP TABLE IF EXISTS `watchaddress`;");
         $this->exec("DROP TABLE IF EXISTS `blockchaintransaction`;");
-        $this->exec("DROP TABLE IF EXISTS `confirmationtriggered`;");
+        $this->exec("DROP TABLE IF EXISTS `callbacktriggered`;");
+        $this->exec("DROP TABLE IF EXISTS `pendingcarriertx`;");
 
     } 
 
@@ -84,12 +85,26 @@ EOT
         );
 
         $this->exec($_t = <<<EOT
-CREATE TABLE IF NOT EXISTS `confirmationtriggered` (
+CREATE TABLE IF NOT EXISTS `callbacktriggered` (
     `tx_hash`       varbinary(64) NOT NULL DEFAULT '',
     `confirmations` int(11) NOT NULL DEFAULT '0',
     `blockId`       int(20) unsigned NOT NULL DEFAULT 0,
     PRIMARY KEY (`tx_hash`,`confirmations`),
     KEY `blockId` (`blockId`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+EOT
+        );
+
+        $this->exec($_t = <<<EOT
+CREATE TABLE IF NOT EXISTS `pendingcarriertx` (
+    `tx_hash`       varbinary(64) NOT NULL DEFAULT '',
+    `isMempool`     int(1) NOT NULL DEFAULT '0',
+    `blockId`       int(20) unsigned NOT NULL DEFAULT 0,
+    `timestamp`     int(11) unsigned NOT NULL DEFAULT 0,
+    PRIMARY KEY (`tx_hash`),
+    KEY `blockId` (`blockId`),
+    KEY `timestamp` (`timestamp`),
+    KEY `isMempool` (`isMempool`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 EOT
         );
