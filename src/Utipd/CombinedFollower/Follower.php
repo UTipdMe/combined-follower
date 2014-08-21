@@ -21,6 +21,8 @@ class Follower
     protected $new_xcpd_block_callback_fn;
     protected $mempool_tx_callback_fn;
     protected $confirmed_tx_callback_fn;
+    protected $orphaned_block_callback_fn;
+    protected $orphaned_transaction_callback_fn;
 
     protected $max_confirmations_for_confirmed_tx = 6;
 
@@ -74,12 +76,22 @@ class Follower
         $this->new_xcpd_block_callback_fn = $callback_fn;
     }
 
-    // function ($transaction, $is_native, $current_block_id) {}
+    // function ($orphaned_block_id) {}
+    public function handleOrphanedBlock(callable $callback_fn) {
+        $this->orphaned_block_callback_fn = $callback_fn;
+    }
+
+    // function ($transaction) {}
+    public function handleOrphanedTransaction(callable $callback_fn) {
+        $this->orphaned_transaction_callback_fn = $callback_fn;
+    }
+
+    // function ($transaction, $current_block_id) {}
     public function handleMempoolTransaction(callable $callback_fn) {
         $this->mempool_tx_callback_fn = $callback_fn;
     }
     
-    // function ($transaction, $is_native) {}
+    // function ($transaction, $number_of_confirmations, $current_block_id) {}
     public function handleConfirmedTransaction(callable $callback_fn) {
         $this->confirmed_tx_callback_fn = $callback_fn;
     }
@@ -234,15 +246,31 @@ class Follower
         });
 
         $this->native_follower->handleOrphanedBlock(function($orphaned_block_id) {
-            // get all accounts affected
-            $entries = $this->blockchain_tx_directory->find(['blockId' => $orphaned_block_id]);
-            $account_ids = [];
-            foreach($entries as $entry) {
-                $account_ids[$entry['accountId']] = true;
+            if (isset($this->orphaned_transaction_callback_fn)) {
+                $orphaned_transactions = iterator_to_array($this->blockchain_tx_directory->find(['blockId' => $orphaned_block_id, 'isMempool' => false]));
             }
 
             // delete transactions
             $this->blockchain_tx_directory->deleteWhere(['blockId' => $orphaned_block_id]);
+
+            // tell the counterparty follower to orphan this block
+            $this->xcpd_follower->orphanBlock($orphaned_block_id);
+
+
+            // callback the orphaned block callback function
+            if (isset($this->orphaned_block_callback_fn)) {
+                $f = $this->orphaned_block_callback_fn;
+                $f($orphaned_block_id);
+            }
+
+            // callback the orphaned transactions callbacks
+            if (isset($this->orphaned_transaction_callback_fn)) {
+                $f = $this->orphaned_transaction_callback_fn;
+                foreach($orphaned_transactions as $orphaned_transaction) {
+                    $f($orphaned_transaction);
+                }
+            }
+
         });
     }
 
@@ -259,7 +287,7 @@ class Follower
             // mempool
             if (isset($this->mempool_tx_callback_fn)) {
                 $f = $this->mempool_tx_callback_fn;
-                $f($transaction, $is_native, $current_block_id);
+                $f($transaction, $current_block_id);
             }
         } else {
             // confirmed
@@ -268,10 +296,10 @@ class Follower
                 // always send first confirmation
                 $f = $this->confirmed_tx_callback_fn;
                 $number_of_confirmations = 1;
-                $f($transaction, $is_native, $number_of_confirmations, $current_block_id);
+                $f($transaction, $number_of_confirmations, $current_block_id);
 
                 // mark as triggered
-                $this->markConfirmationTriggered($transaction['tx_hash'], $number_of_confirmations);
+                $this->markConfirmationTriggered($transaction['tx_hash'], $number_of_confirmations, $current_block_id);
             }
         }
     }
@@ -300,10 +328,10 @@ class Follower
                 $number_of_confirmations = $i + 1;
                 if ($this->shouldTriggerConfirmation($transaction['tx_hash'], $number_of_confirmations)) {
                     // trigger confirmation callback
-                    $f($transaction, $is_native, $number_of_confirmations, $block_id);
+                    $f($transaction, $number_of_confirmations, $block_id);
 
                     // mark as triggered
-                    $this->markConfirmationTriggered($transaction['tx_hash'], $number_of_confirmations);
+                    $this->markConfirmationTriggered($transaction['tx_hash'], $number_of_confirmations, $block_id);
                 }
             }
 
@@ -317,9 +345,9 @@ class Follower
         return ($row[0] == 0);
     }
 
-    protected function markConfirmationTriggered($tx_hash, $number_of_confirmations) {
-        $sth = $this->db_connection->prepare("REPLACE INTO confirmationtriggered VALUES (?,?)");
-        $result = $sth->execute([$tx_hash, $number_of_confirmations]);
+    protected function markConfirmationTriggered($tx_hash, $number_of_confirmations, $block_id) {
+        $sth = $this->db_connection->prepare("REPLACE INTO confirmationtriggered (tx_hash, confirmations, blockId) VALUES (?,?,?)");
+        $result = $sth->execute([$tx_hash, $number_of_confirmations, $block_id]);
     }
 
     ////////////////////////////////////////////////////////////////////////

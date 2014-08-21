@@ -86,7 +86,9 @@ EOT
 CREATE TABLE IF NOT EXISTS `confirmationtriggered` (
     `tx_hash`       varbinary(64) NOT NULL DEFAULT '',
     `confirmations` int(11) NOT NULL DEFAULT '0',
-    PRIMARY KEY (`tx_hash`,`confirmations`)
+    `blockId`       int(20) unsigned NOT NULL DEFAULT 0,
+    PRIMARY KEY (`tx_hash`,`confirmations`),
+    KEY `blockId` (`blockId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 EOT
         );

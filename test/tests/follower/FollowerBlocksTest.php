@@ -52,10 +52,11 @@ class FollowerBlocksTest extends \PHPUnit_Framework_TestCase
 
         // watch mempool tx
         $follower = $this->getFollower();
+        // $follower->addAddressToWatch('dest02');
         $native_txs_map = [];
         $xcp_txs_map = [];
-        $follower->handleMempoolTransaction(function ($transaction, $is_native, $current_block_id) use (&$native_txs_map, &$xcp_txs_map) {
-            if ($is_native) {
+        $follower->handleMempoolTransaction(function ($transaction, $current_block_id) use (&$native_txs_map, &$xcp_txs_map) {
+            if (!!$transaction['isNative']) {
                 $native_txs_map[$current_block_id][] = $transaction;
             } else {
                 $xcp_txs_map[$current_block_id][] = $transaction;
@@ -93,15 +94,15 @@ class FollowerBlocksTest extends \PHPUnit_Framework_TestCase
         $follower->setMaxConfirmationsForConfirmedCallback(3);
         $native_txs = [];
         $xcp_txs = [];
-        $follower->handleConfirmedTransaction(function ($transaction, $is_native, $confirmations, $current_block_id) use (&$native_txs, &$xcp_txs) {
-            if ($is_native) {
+        $follower->handleConfirmedTransaction(function ($transaction, $confirmations, $current_block_id) use (&$native_txs, &$xcp_txs) {
+            if (!!$transaction['isNative']) {
                 $native_txs[] = ['confirmations' => $confirmations, 'blockId' => $current_block_id, 'tx' => $transaction];
             } else {
                 $xcp_txs[] = ['confirmations' => $confirmations, 'blockId' => $current_block_id, 'tx' => $transaction];
             }
         });
 
-        // run 2 iterations
+        // run 6 iterations
         $follower->setGenesisBlock(300000);
         $this->setCurrentBlock(300000);
         $follower->runOneIteration();
@@ -145,6 +146,77 @@ class FollowerBlocksTest extends \PHPUnit_Framework_TestCase
         PHPUnit::assertEquals('hash2', $xcp_txs[5]['tx']['tx_hash']);
     }
 
+
+
+    public function testOrphanedBlocksReprocessCounterpartyTransactions() {
+        // init all dbs
+        $this->initAllFollowerDBs();
+
+        // init the sample blocks
+        $this->initAllSampleData();
+
+        // watch confirmed tx
+        $follower = $this->getFollower();
+        $follower->setMaxConfirmationsForConfirmedCallback(3);
+
+        // run 2 blocks
+        $follower->setGenesisBlock(300000);
+        $this->setCurrentBlock(300000);
+        $follower->runOneIteration();
+        $this->setCurrentBlock(300001);
+        $follower->runOneIteration();
+
+        // validate next block is 300002
+        PHPUnit::assertEquals(300001, $this->getNativeFollower()->getLastProcessedBlock());
+        PHPUnit::assertEquals(300001, $this->getXCPDFollower()->getLastProcessedBlock());
+
+        // now orphan next block 300001
+        $this->native_blocks = $this->getSampleNativeBlocksForReorganizedChain();
+        $this->setCurrentBlock(300003);
+        $follower->runOneIteration();
+
+        // validate next block is 300002 again
+        PHPUnit::assertEquals(300001, $this->getNativeFollower()->getLastProcessedBlock());
+        PHPUnit::assertEquals(300001, $this->getXCPDFollower()->getLastProcessedBlock());
+    }
+
+
+
+    public function testHandleOrphanedTransaction() {
+        // init all dbs
+        $this->initAllFollowerDBs();
+
+        // init the sample blocks
+        $this->initAllSampleData();
+
+        // watch confirmed tx
+        $follower = $this->getFollower();
+        $follower->addAddressToWatch('dest02');
+        $follower->addAddressToWatch('1AEwxRGP4HdwrwoXo1rEKc3jihFmZUybCw');
+
+        // handle orphaned transactions
+        $orphaned_transactions = [];
+        $follower->handleOrphanedTransaction(function($orphaned_transaction) use (&$orphaned_transactions) {
+            $orphaned_transactions[] = $orphaned_transaction;
+        });
+
+        // run 2 blocks
+        $follower->setGenesisBlock(300000);
+        $this->setCurrentBlock(300000);
+        $follower->runOneIteration();
+        $this->setCurrentBlock(300001);
+        $follower->runOneIteration();
+
+        // now orphan next block 300001
+        $this->native_blocks = $this->getSampleNativeBlocksForReorganizedChain();
+        $this->setCurrentBlock(300003);
+        $follower->runOneIteration();
+
+        // validate orphaned_transactions
+        PHPUnit::assertCount(2, $orphaned_transactions);
+        PHPUnit::assertEquals('1AEwxRGP4HdwrwoXo1rEKc3jihFmZUybCw', $orphaned_transactions[0]['destination']);
+        PHPUnit::assertEquals('dest02', $orphaned_transactions[1]['destination']);
+    }
 
 
 
@@ -435,6 +507,46 @@ EOT
                 "tx" => [
                     "G00001",
                     "G00002",
+                ],
+            ],
+        ];
+    }
+
+    protected function getSampleNativeBlocksForReorganizedChain() {
+        return [
+            "300000" => [
+                "previousblockhash" => "BLK_NORM_G099",
+                "hash"              => "BLK_NORM_A100",
+                "tx" => [
+                    "A00001",
+                    "A00002",
+                ],
+            ],
+            "300001" => [
+
+                "previousblockhash" => "BLK_NORM_A100",
+                "hash"              => "BLK_REORG_B101",
+                "tx" => [
+                    "B00001",
+                    "B00002",
+                ],
+            ],
+            "300002" => [
+
+                "previousblockhash" => "BLK_REORG_B101",
+                "hash"              => "BLK_REORG_C102",
+                "tx" => [
+                    "C00001",
+                    "C00002",
+                ],
+            ],
+            "300003" => [
+
+                "previousblockhash" => "BLK_REORG_C102",
+                "hash"              => "BLK_REORG_D103",
+                "tx" => [
+                    "D00001",
+                    "D00002",
                 ],
             ],
         ];
