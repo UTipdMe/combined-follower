@@ -12,8 +12,6 @@ use Utipd\CombinedFollower\Models\Directory\WatchAddressDirectory;
 class Follower
 {
 
-    protected $is_inited = false;
-
     // no blocks before this are ever seen
     protected $genesis_block = 314170;
 
@@ -106,8 +104,6 @@ class Follower
     // Setup
 
     public function runOneIteration() {
-        if (!$this->is_inited) { $this->init(); }
-
         $this->native_follower->processOneNewBlock();
         $this->xcpd_follower->processOneNewBlock();
     }
@@ -156,11 +152,8 @@ class Follower
 
 
     protected function init() {
-        if (!$this->is_inited) {
-            $this->setupXCPDFollowerCallbacks();
-            $this->setupNativeFollowerCallbacks();
-            $this->is_inited = true;
-        }
+        $this->setupXCPDFollowerCallbacks();
+        $this->setupNativeFollowerCallbacks();
     }
 
     protected function setupXCPDFollowerCallbacks() {
