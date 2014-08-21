@@ -176,6 +176,7 @@ class Follower
             // we have a new counterparty send
             if ($is_mempool) {
                 $current_block_id = $this->xcpd_follower->getLastProcessedBlock();
+                if ($current_block_id === null) { $current_block_id = $block_id; }
             } else {
                 $current_block_id = $block_id;
             }
@@ -212,6 +213,7 @@ class Follower
             //       address: "1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
             if ($is_mempool) {
                 $current_block_id = $this->native_follower->getLastProcessedBlock();
+                if ($current_block_id === null) { $current_block_id = $block_id; }
             } else {
                 $current_block_id = $block_id;
             }
