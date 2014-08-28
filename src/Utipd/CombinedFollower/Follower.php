@@ -249,10 +249,15 @@ class Follower
 
                 // do we care about this destination address?
                 if (isset($all_watch_addresses_map[$destination_address])) {
+                    $sources_map = [];
+                    foreach ($native_tx['inputs'] as $input) {
+                        $sources_map[$input['address']] = true;
+                    }
+
                     $btc_send_data = [];
                     $btc_send_data['tx_index']    = $native_tx['txid'];
                     $btc_send_data['block_index'] = $block_id;
-                    $btc_send_data['source']      = ''; // not tracked
+                    $btc_send_data['source']      = array_keys($sources_map);
                     $btc_send_data['destination'] = $destination_address;
                     $btc_send_data['asset']       = 'BTC';
                     $btc_send_data['quantity']    = $output['amount']; // already in satoshis
