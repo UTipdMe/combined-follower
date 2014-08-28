@@ -224,7 +224,7 @@ class Follower
             $this->invokeConfirmedTransactionCallbacks($block_id, $is_native=true);
         });
 
-        $this->native_follower->handleNewTransaction(function($transaction, $block_id, $is_mempool) {
+        $this->native_follower->handleNewTransaction(function($native_tx, $block_id, $is_mempool) {
             // a new transaction
             // txid: cc91db2f18b908903cb7c7a4474695016e12afd816f66a209e80b7511b29bba9
             // outputs:
@@ -241,7 +241,7 @@ class Follower
             // find the accounts that we care about watching
             $all_watch_addresses_map = $this->buildWatchAddressMap();
 
-            foreach ($transaction['outputs'] as $output) {
+            foreach ($native_tx['outputs'] as $output) {
                 if (!$output['address']) { continue; }
 
                 $destination_address = $output['address'];
@@ -249,17 +249,17 @@ class Follower
                 // do we care about this destination address?
                 if (isset($all_watch_addresses_map[$destination_address])) {
                     $btc_send_data = [];
-                    $btc_send_data['tx_index']    = $transaction['txid'];
+                    $btc_send_data['tx_index']    = $native_tx['txid'];
                     $btc_send_data['block_index'] = $block_id;
                     $btc_send_data['source']      = ''; // not tracked
                     $btc_send_data['destination'] = $destination_address;
                     $btc_send_data['asset']       = 'BTC';
                     $btc_send_data['quantity']    = $output['amount']; // already in satoshis
                     $btc_send_data['status']      = 'valid';
-                    $btc_send_data['tx_hash']     = $transaction['txid'];
+                    $btc_send_data['tx_hash']     = $native_tx['txid'];
 
-                    $transaction = $this->createNewTransaction($btc_send_data, $is_native=true, $is_mempool, $current_block_id);
-                    $this->invokeNewTransactionCallbacks($transaction, $is_native=true, $is_mempool, $current_block_id);
+                    $transaction_model = $this->createNewTransaction($btc_send_data, $is_native=true, $is_mempool, $current_block_id);
+                    $this->invokeNewTransactionCallbacks($transaction_model, $is_native=true, $is_mempool, $current_block_id);
                 }
             }
         });
