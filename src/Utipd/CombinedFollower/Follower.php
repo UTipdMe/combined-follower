@@ -5,6 +5,7 @@ namespace Utipd\CombinedFollower;
 use PDO;
 use Utipd\CombinedFollower\Models\Directory\BlockchainTransactionDirectory;
 use Utipd\CombinedFollower\Models\Directory\WatchAddressDirectory;
+use Utipd\MysqlModel\ConnectionManager;
 
 // TODO: suppress dust BTC transactions that are actually XCP transactions
 
@@ -30,13 +31,13 @@ class Follower
 
     var $_now_timestamp = null; // for testing
 
-    function __construct($native_follower, $xcpd_follower, PDO $db_connection) {
+    function __construct($native_follower, $xcpd_follower, ConnectionManager $connection_manager) {
         $this->native_follower = $native_follower;
         $this->xcpd_follower = $xcpd_follower;
-        $this->db_connection = $db_connection;
+        $this->connection_manager = $connection_manager;
 
         // init directories
-        $this->blockchain_tx_directory = new BlockchainTransactionDirectory($db_connection);
+        $this->blockchain_tx_directory = new BlockchainTransactionDirectory($connection_manager);
 
         // init default genesis block for followers
         $this->xcpd_follower->setGenesisBlock($this->genesis_block);
@@ -56,15 +57,15 @@ class Follower
     // watch addresses
 
     public function addAddressToWatch($bitcoin_address) {
-        $result = $this->db_connection->prepare("REPLACE INTO watchaddress VALUES (?)")->execute([$bitcoin_address]);
+        $result = $this->getDBConnection()->prepare("REPLACE INTO watchaddress VALUES (?)")->execute([$bitcoin_address]);
     }
 
     public function removeAddressToWatch($bitcoin_address) {
-        $result = $this->db_connection->prepare("DELETE FROM watchaddress WHERE address = ?")->execute([$bitcoin_address]);
+        $result = $this->getDBConnection()->prepare("DELETE FROM watchaddress WHERE address = ?")->execute([$bitcoin_address]);
     }
 
     public function clearAllAddressesToWatch() {
-        $result = $this->db_connection->exec("TRUNCATE watchaddress");
+        $result = $this->getDBConnection()->exec("TRUNCATE watchaddress");
     }
 
 
@@ -409,14 +410,14 @@ class Follower
     }
 
     protected function shouldTriggerCallback($tx_hash, $number_of_confirmations) {
-        $sth = $this->db_connection->prepare("SELECT COUNT(*) FROM callbacktriggered WHERE tx_hash = ? AND confirmations = ?");
+        $sth = $this->getDBConnection()->prepare("SELECT COUNT(*) FROM callbacktriggered WHERE tx_hash = ? AND confirmations = ?");
         $result = $sth->execute([$tx_hash, $number_of_confirmations]);
         $row = $sth->fetch(PDO::FETCH_NUM);
         return ($row[0] == 0);
     }
 
     protected function markCallbackTriggered($tx_hash, $number_of_confirmations, $block_id) {
-        $sth = $this->db_connection->prepare("REPLACE INTO callbacktriggered (tx_hash, confirmations, blockId) VALUES (?,?,?)");
+        $sth = $this->getDBConnection()->prepare("REPLACE INTO callbacktriggered (tx_hash, confirmations, blockId) VALUES (?,?,?)");
         $result = $sth->execute([$tx_hash, $number_of_confirmations, $block_id]);
     }
 
@@ -425,14 +426,14 @@ class Follower
        
 
     protected function isWatchAddress($address) {
-        $sth = $this->db_connection->prepare("SELECT COUNT(*) FROM watchaddress WHERE address = ?");
+        $sth = $this->getDBConnection()->prepare("SELECT COUNT(*) FROM watchaddress WHERE address = ?");
         $result = $sth->execute([$address]);
         $row = $sth->fetch(PDO::FETCH_NUM);
         return ($row[0] > 0);
     }
 
     protected function buildWatchAddressMap() {
-        $sth = $this->db_connection->query("SELECT * FROM watchaddress");
+        $sth = $this->getDBConnection()->query("SELECT * FROM watchaddress");
         $map = [];
         while ($row = $sth->fetch(PDO::FETCH_NUM)) {
             $map[$row[0]] = true;
@@ -454,7 +455,7 @@ class Follower
     }
 
     protected function savePendingXCPCarrierTransaction($tx_hash, $block_id, $is_mempool) {
-        $sth = $this->db_connection->prepare("REPLACE INTO pendingcarriertx (`tx_hash`, `blockId`, `isMempool`, `timestamp`) VALUES (?,?,?,?)");
+        $sth = $this->getDBConnection()->prepare("REPLACE INTO pendingcarriertx (`tx_hash`, `blockId`, `isMempool`, `timestamp`) VALUES (?,?,?,?)");
         $timestamp = time();
         $result = $sth->execute([$tx_hash, $block_id, $is_mempool, $timestamp]);
     }
@@ -469,17 +470,17 @@ class Follower
     }
 
     protected function clearMempoolXCPCarrierTransactions() {
-        $result = $this->db_connection->exec("DELETE FROM pendingcarriertx WHERE isMempool = 1");
+        $result = $this->getDBConnection()->exec("DELETE FROM pendingcarriertx WHERE isMempool = 1");
     }
 
     protected function clearMempoolXCPCarrierTransactionsByBlockID($block_id) {
-        $sth = $this->db_connection->prepare("DELETE FROM pendingcarriertx WHERE blockId >= ?");
+        $sth = $this->getDBConnection()->prepare("DELETE FROM pendingcarriertx WHERE blockId >= ?");
         $result = $sth->execute([$block_id]);
     }
 
     protected function handleTimedOutBTCDustTransactions() {
         $old_enough_ts = $this->now() - $this->BTC_DUST_TIMEOUT_TTL;
-        $sth = $this->db_connection->prepare("SELECT * FROM pendingcarriertx WHERE timestamp <= ?");
+        $sth = $this->getDBConnection()->prepare("SELECT * FROM pendingcarriertx WHERE timestamp <= ?");
         $result = $sth->execute([$old_enough_ts]);
 
         $tx_hashes_to_delete = [];
@@ -494,7 +495,7 @@ class Follower
         // delete all the tx hashes
         if ($tx_hashes_to_delete) {
             $q_marks = rtrim(str_repeat('?,', count($tx_hashes_to_delete)), ',');
-            $result = $this->db_connection->prepare("DELETE FROM pendingcarriertx WHERE tx_hash IN ({$q_marks})")->execute($tx_hashes_to_delete);
+            $result = $this->getDBConnection()->prepare("DELETE FROM pendingcarriertx WHERE tx_hash IN ({$q_marks})")->execute($tx_hashes_to_delete);
         }
 
         // process all the tx_hashes
@@ -516,6 +517,10 @@ class Follower
     protected function now() {
         if (isset($this->_now_timestamp)) { return $this->_now_timestamp; }
         return time();
+    }
+
+    protected function getDBConnection() {
+        return $this->connection_manager->getConnection();
     }
 
 }
