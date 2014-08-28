@@ -2,6 +2,7 @@
 
 use Utipd\CombinedFollower\Follower;
 use Utipd\CombinedFollower\FollowerSetup;
+use Utipd\MysqlModel\ConnectionManager;
 use \Exception;
 use \PHPUnit_Framework_Assert as PHPUnit;
 
@@ -424,7 +425,7 @@ class FollowerBlocksTest extends \PHPUnit_Framework_TestCase
     
     
     protected function getFollower() {
-        $follower = new Follower($this->getNativeFollower(), $this->getXCPDFollower(), $this->getPDO());
+        $follower = new Follower($this->getNativeFollower(), $this->getXCPDFollower(), $this->getConnectionManager());
         $follower->addAddressToWatch('dest01');
         return $follower;
     }
@@ -464,6 +465,12 @@ class FollowerBlocksTest extends \PHPUnit_Framework_TestCase
         $pdo = new \PDO($db_connection_string, $db_user, $db_password);
         $pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
         return $pdo;
+    }
+
+    protected function getConnectionManager() {
+        list($db_connection_string, $db_user, $db_password, $db_name) = $this->buildConnectionInfo(true);
+        $manager = new ConnectionManager($db_connection_string, $db_user, $db_password);
+        return $manager;
     }
 
     protected function getNativeFollower() {
