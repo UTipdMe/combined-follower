@@ -2,6 +2,7 @@
 
 namespace Utipd\CombinedFollower;
 
+use Emailme\Currency\CurrencyUtil;
 use PDO;
 use Utipd\CombinedFollower\Models\Directory\BlockchainTransactionDirectory;
 use Utipd\CombinedFollower\Models\Directory\WatchAddressDirectory;
@@ -199,6 +200,12 @@ class Follower
             }
 
             if ($this->isWatchAddress($send_data['destination'])) {
+                // the asset is not divisible, then the quantity will not be in satoshis
+                if (!$send_data['assetInfo']['divisible']) {
+                    // convert to satoshis for consistency
+                    $send_data['quantity'] =  CurrencyUtil::numberToSatoshis($send_data['quantity']);
+                }
+
                 // handle a new send
                 $transaction = $this->createNewTransaction($send_data, $is_native=false, $is_mempool, $current_block_id);
                 $this->invokeNewTransactionCallbacks($transaction, $is_native=false, $is_mempool, $current_block_id);
