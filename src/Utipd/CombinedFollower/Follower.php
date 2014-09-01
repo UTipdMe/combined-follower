@@ -340,7 +340,7 @@ class Follower
         if (!$skip_callback) {
             $was_triggered = $this->callNewTransactionCallbacks($transaction, $is_native, $is_mempool, $current_block_id, $number_of_confirmations);
             if ($was_triggered) {
-                $this->markCallbackTriggered($transaction['tx_hash'], $number_of_confirmations, $current_block_id);
+                $this->markCallbackTriggered($transaction['tx_hash'], $transaction['destination'], $number_of_confirmations, $current_block_id);
             }
         }
     }
@@ -350,7 +350,8 @@ class Follower
         if ($is_mempool) {
             // mempool
             if (isset($this->mempool_tx_callback_fn)) {
-                if ($this->shouldTriggerCallback($transaction['tx_hash'], $number_of_confirmations)) {
+                // print "shouldTriggerCallback: {$transaction['tx_hash']} for dest {$transaction['destination']}: ".($this->shouldTriggerCallback($transaction['tx_hash'], $number_of_confirmations) ? 'TRUE' : 'FALSE')."\n";
+                if ($this->shouldTriggerCallback($transaction['tx_hash'], $transaction['destination'], $number_of_confirmations)) {
                     $f = $this->mempool_tx_callback_fn;
                     $f($transaction, $current_block_id);
                     $was_triggered = true;
@@ -359,7 +360,7 @@ class Follower
         } else {
             // confirmed
             if (isset($this->confirmed_tx_callback_fn)) {
-                if ($this->shouldTriggerCallback($transaction['tx_hash'], $number_of_confirmations)) {
+                if ($this->shouldTriggerCallback($transaction['tx_hash'], $transaction['destination'], $number_of_confirmations)) {
                     $f = $this->confirmed_tx_callback_fn;
                     $f($transaction, $number_of_confirmations, $current_block_id);
                     $was_triggered = true;
@@ -409,28 +410,28 @@ class Follower
             // trigger every confirmation up to $this->max_confirmations_for_confirmed_tx
             for ($i=0; $i < $max_number_of_confirmations; $i++) { 
                 $number_of_confirmations = $i + 1;
-                if (!$skip_callback AND $this->shouldTriggerCallback($transaction['tx_hash'], $number_of_confirmations)) {
+                if (!$skip_callback AND $this->shouldTriggerCallback($transaction['tx_hash'], $transaction['destination'], $number_of_confirmations)) {
                     // trigger confirmation callback
                     $f($transaction, $number_of_confirmations, $block_id);
 
                     // mark as triggered
-                    $this->markCallbackTriggered($transaction['tx_hash'], $number_of_confirmations, $block_id);
+                    $this->markCallbackTriggered($transaction['tx_hash'], $transaction['destination'], $number_of_confirmations, $block_id);
                 }
 
             }
         }
     }
 
-    protected function shouldTriggerCallback($tx_hash, $number_of_confirmations) {
-        $sth = $this->getDBConnection()->prepare("SELECT COUNT(*) FROM callbacktriggered WHERE tx_hash = ? AND confirmations = ?");
-        $result = $sth->execute([$tx_hash, $number_of_confirmations]);
+    protected function shouldTriggerCallback($tx_hash, $destination, $number_of_confirmations) {
+        $sth = $this->getDBConnection()->prepare("SELECT COUNT(*) FROM callbacktriggered WHERE tx_hash = ? AND destination = ? AND confirmations = ?");
+        $result = $sth->execute([$tx_hash, $destination, $number_of_confirmations]);
         $row = $sth->fetch(PDO::FETCH_NUM);
         return ($row[0] == 0);
     }
 
-    protected function markCallbackTriggered($tx_hash, $number_of_confirmations, $block_id) {
-        $sth = $this->getDBConnection()->prepare("REPLACE INTO callbacktriggered (tx_hash, confirmations, blockId) VALUES (?,?,?)");
-        $result = $sth->execute([$tx_hash, $number_of_confirmations, $block_id]);
+    protected function markCallbackTriggered($tx_hash, $destination, $number_of_confirmations, $block_id) {
+        $sth = $this->getDBConnection()->prepare("REPLACE INTO callbacktriggered (tx_hash, destination, confirmations, blockId) VALUES (?,?,?,?)");
+        $result = $sth->execute([$tx_hash, $destination, $number_of_confirmations, $block_id]);
     }
 
     ////////////////////////////////////////////////////////////////////////
@@ -521,7 +522,7 @@ class Follower
 
             // mark as triggered
             if ($was_triggered) {
-                $this->markCallbackTriggered($transaction['tx_hash'], $number_of_confirmations, $current_block_id);
+                $this->markCallbackTriggered($transaction['tx_hash'], $transaction['destination'], $number_of_confirmations, $current_block_id);
             }
         }
     }

@@ -80,6 +80,54 @@ class FollowerBlocksTest extends \PHPUnit_Framework_TestCase
     }
 
 
+    // when one transaction involves 2 different watch addresses,
+    //   we need to make sure that after the first watch address deals with it, the second also sees it.
+    public function testTwoWatchAddressMempoolTransactions() {
+        // init all dbs
+        $this->initAllFollowerDBs();
+
+        // init the sample blocks
+        $this->initAllSampleData();
+        // this has a xcp payment to dest02
+        // we need to have a btc payment to otherwatch01 as well
+        $this->mempool_native_transactions['rawtxid001']->vout[0]->scriptPubKey->addresses[0] = 'otherwatch01';
+        $this->mempool_native_transactions['rawtxid001']->txid = 'mempool01txhash';
+        // echo "\$this->mempool_xcp_transactions:\n".json_encode($this->mempool_xcp_transactions, 192)."\n"; exit();
+
+
+        // watch mempool tx
+        $follower = $this->getFollower();
+        $follower->addAddressToWatch('otherwatch01');
+
+
+        // send a counterparty asset with change from a to b, but watch both a and b
+        $native_txs_map = [];
+        $xcp_txs_map = [];
+        $destination_addresses_map = ['native'=>[], 'counterparty'=>[]];
+        $follower->handleMempoolTransaction(function ($transaction, $current_block_id) use (&$native_txs_map, &$xcp_txs_map, &$destination_addresses_map) {
+            if (!!$transaction['isNative']) {
+                $destination_addresses_map['native'][$transaction['destination']] = true;
+                $native_txs_map[$current_block_id][] = $transaction;
+            } else {
+                $destination_addresses_map['counterparty'][$transaction['destination']] = true;
+                $xcp_txs_map[$current_block_id][] = $transaction;
+            }
+        });
+
+        // run 2 iterations
+        $follower->setGenesisBlock(300000);
+        $this->setCurrentBlock(300000);
+        $follower->runOneIteration();
+
+        // check that both addresses were triggered, even though it was the same transaction
+        PHPUnit::assertArrayHasKey('dest01', $destination_addresses_map['native']);
+        PHPUnit::assertArrayHasKey('otherwatch01', $destination_addresses_map['native']);
+        PHPUnit::assertArrayHasKey('dest01', $destination_addresses_map['counterparty']);
+    }
+
+
+
+
     public function testReceiveConfirmedTransactions() {
         // init all dbs
         $this->initAllFollowerDBs();
@@ -656,7 +704,7 @@ class FollowerBlocksTest extends \PHPUnit_Framework_TestCase
         return json_decode($_j = <<<EOT
                         [
                             {
-                                "bindings": "{\"asset\": \"MYASSETONE\", \"destination\": \"dest01\", \"quantity\": 10, \"source\": \"13UxmTs2Ad2CpMGvLJu3tSV2YVuiNcVkvn\", \"tx_hash\": \"c324e62d0ba17f42a774b9b28114217c777914a4b6dd0d41811217cffb8c40a6\"}",
+                                "bindings": "{\"asset\": \"MYASSETONE\", \"destination\": \"dest01\", \"quantity\": 10, \"source\": \"13UxmTs2Ad2CpMGvLJu3tSV2YVuiNcVkvn\", \"tx_hash\": \"mempool01txhash\"}",
                                 "category": "sends",
                                 "command": "insert",
                                 "timestamp": 1407585745,

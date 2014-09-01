@@ -87,9 +87,10 @@ EOT
         $this->exec($_t = <<<EOT
 CREATE TABLE IF NOT EXISTS `callbacktriggered` (
     `tx_hash`       varbinary(64) NOT NULL DEFAULT '',
+    `destination`   varbinary(34) NOT NULL,
     `confirmations` int(11) NOT NULL DEFAULT '0',
     `blockId`       int(20) unsigned NOT NULL DEFAULT 0,
-    PRIMARY KEY (`tx_hash`,`confirmations`),
+    PRIMARY KEY (`tx_hash`,`destination`,`confirmations`),
     KEY `blockId` (`blockId`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 EOT
