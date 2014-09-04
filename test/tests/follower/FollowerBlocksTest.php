@@ -585,7 +585,11 @@ class FollowerBlocksTest extends \PHPUnit_Framework_TestCase
 
                     // no sends
                     return [];
-                })->addCallback('get_mempool', function() {
+                })
+                ->addCallback('get_credits', function($vars) {
+                    return [];
+                })
+                ->addCallback('get_mempool', function() {
                     return $this->mempool_xcp_transactions;
                 });
         }

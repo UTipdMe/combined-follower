@@ -190,7 +190,7 @@ class Follower
             $this->invokeConfirmedTransactionCallbacks($block_id, $is_native=false);
         });
 
-        $this->xcpd_follower->handleNewSend(function($send_data, $block_id, $is_mempool) {
+        $handle_xcpd_transaction_fn = function($send_data, $block_id, $is_mempool) {
             // we have a new counterparty send
             if ($is_mempool) {
                 $current_block_id = $this->xcpd_follower->getLastProcessedBlock();
@@ -210,7 +210,11 @@ class Follower
                 $transaction = $this->createNewTransaction($send_data, $is_native=false, $is_mempool, $current_block_id);
                 $this->invokeNewTransactionCallbacks($transaction, $is_native=false, $is_mempool, $current_block_id);
             }
-        });
+        };
+
+        // treat sends and credits the same way
+        $this->xcpd_follower->handleNewSend($handle_xcpd_transaction_fn);
+        $this->xcpd_follower->handleNewCredit($handle_xcpd_transaction_fn);
     }
 
     protected function setupNativeFollowerCallbacks() {
