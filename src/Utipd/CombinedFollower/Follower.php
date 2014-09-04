@@ -199,6 +199,12 @@ class Follower
                 $current_block_id = $block_id;
             }
 
+            // if credit only, then adjust variables
+            if ($send_data['category'] == 'credits') {
+                $send_data['destination'] = $send_data['address'];
+                $send_data['source'] = '';
+            }
+
             if ($this->isWatchAddress($send_data['destination'])) {
                 // the asset is not divisible, then the quantity will not be in satoshis
                 if (!$send_data['assetInfo']['divisible']) {
