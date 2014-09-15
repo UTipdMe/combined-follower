@@ -122,9 +122,11 @@ class Follower
 
     // this can return a null or a new transaction
     public function createNewTransaction($send_data, $is_native, $is_mempool, $current_block_id) {
+        $destination = $send_data['destination'];
+
         // if this is a mempool transaction, be sure not to delete a transaction
         if ($is_mempool) {
-            $existing_live_blockchain_tx_entry = $this->blockchain_tx_directory->findOne(['tx_hash' => $send_data['tx_hash'], 'isNative' => $is_native ? 1 : 0, 'isMempool' => 0]);
+            $existing_live_blockchain_tx_entry = $this->blockchain_tx_directory->findOne(['tx_hash' => $send_data['tx_hash'], 'destination' => $destination, 'isNative' => $is_native ? 1 : 0, 'isMempool' => 0]);
 
             if ($existing_live_blockchain_tx_entry) {
                 // this is a mempool transaction arriving AFTER a live version of the transaction has already been recorded
@@ -134,8 +136,8 @@ class Follower
             }
         }
 
-        // delete any existing transactions with this tx_hash
-        $this->blockchain_tx_directory->deleteWhere(['tx_hash' => $send_data['tx_hash'], 'isNative' => $is_native ? 1 : 0]);
+        // delete any existing transactions with this tx_hash and destination
+        $this->blockchain_tx_directory->deleteWhere(['tx_hash' => $send_data['tx_hash'], 'destination' => $destination, 'isNative' => $is_native ? 1 : 0]);
 
 
         // create a new transaction
@@ -146,7 +148,7 @@ class Follower
 
             'isNative'       => $is_native,
             'isMempool'      => $is_mempool,
-            'destination'    => $send_data['destination'],
+            'destination'    => $destination,
 
             'source'         => $send_data['source'],
             'asset'          => $send_data['asset'],

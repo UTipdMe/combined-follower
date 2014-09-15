@@ -128,6 +128,45 @@ class FollowerBlocksTest extends \PHPUnit_Framework_TestCase
 
 
 
+    public function testTwoWatchAddressesConfirmations() {
+        // init all dbs
+        $this->initAllFollowerDBs();
+
+        // init the sample blocks
+        $this->initAllSampleData();
+
+        // watch confirmed tx
+        $follower = $this->getFollower();
+        $follower->clearAllAddressesToWatch();
+        $follower->addAddressToWatch('1recipient111111111111111111111111');
+        $follower->addAddressToWatch('1recipient222222222222222222222222');
+        $follower->setMaxConfirmationsForConfirmedCallback(3);
+        $native_txs = [];
+        $xcp_txs = [];
+        $follower->handleConfirmedTransaction(function ($transaction, $confirmations, $current_block_id) use (&$native_txs, &$xcp_txs) {
+            if (!!$transaction['isNative']) {
+                $native_txs[] = ['confirmations' => $confirmations, 'blockId' => $current_block_id, 'tx' => $transaction];
+            }
+        });
+
+        // run 2 iterations
+        $follower->setGenesisBlock(300000);
+        $this->setCurrentBlock(300000);
+        $follower->runOneIteration();
+        $this->setCurrentBlock(300001);
+        $follower->runOneIteration();
+
+        // tx 0 - 1 confirmations
+        PHPUnit::assertEquals(1, $native_txs[0]['confirmations']);
+        PHPUnit::assertEquals('A00001', $native_txs[0]['tx']['tx_hash']);
+        PHPUnit::assertEquals('A00001', $native_txs[1]['tx']['tx_hash']);
+        PHPUnit::assertEquals('1recipient111111111111111111111111', $native_txs[0]['tx']['destination']);
+        PHPUnit::assertEquals('1recipient222222222222222222222222', $native_txs[1]['tx']['destination']);
+    }
+
+
+
+
     public function testReceiveConfirmedTransactions() {
         // init all dbs
         $this->initAllFollowerDBs();
@@ -871,13 +910,22 @@ EOT
     ],
     "out": [
         {
-            "addr": "15jhGQfARmEuh8JY73QwrgxYCGhqWAMkAC",
+            "addr": "1recipient111111111111111111111111",
             "n": 0,
             "script": "210231a3996818ce0d955279421e4f0c4bd07502b9c03c135409e3189c0e067cbb9bac",
             "spent": false,
             "txid": 24736715,
             "type": 0,
             "value": 56860000
+        },
+        {
+            "addr": "1recipient222222222222222222222222",
+            "n": 0,
+            "script": "2xxxx",
+            "spent": false,
+            "txid": 24736715,
+            "type": 0,
+            "value": 60000000
         }
     ],
     "relayed_by": "24.210.191.129",
