@@ -2,7 +2,7 @@
 
 namespace Utipd\CombinedFollower;
 
-use Emailme\Currency\CurrencyUtil;
+use Utipd\CurrencyLib\CurrencyUtil;
 use PDO;
 use Utipd\CombinedFollower\Models\Directory\BlockchainTransactionDirectory;
 use Utipd\CombinedFollower\Models\Directory\WatchAddressDirectory;

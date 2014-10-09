@@ -16,7 +16,8 @@
         "nbobtc/bitcoind-php": "dev-master",
         "utipd/counterparty-follower": "dev-master",
         "utipd/xcpd-client": "dev-master",
-        "utipd/mysqlmodel": "dev-master"
+        "utipd/mysqlmodel": "dev-master",
+        "utipd/currency-lib": "dev-master"
     },
     "require-dev": {
         "phpunit/phpunit": "~4"
